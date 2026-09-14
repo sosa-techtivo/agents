@@ -43,7 +43,7 @@ export default function MarkoAgentPage() {
         </p>
       </div>
 
-      <RunAgentButton agentName="MARKO QA Agent" runAction={runMarko} runsBasePath={RUNS_BASE_PATH} />
+      <RunAgentButton agentName="MARKO QA Agent" runAction={runMarko} />
 
       <AgentWorkspace
         testCases={testCases}

@@ -112,7 +112,7 @@ export default function JiritaAgentPage() {
         </p>
       </div>
 
-      <RunAgentButton agentName="JIRITA QA Agent" runAction={runJirita} runsBasePath={RUNS_BASE_PATH} />
+      <RunAgentButton agentName="JIRITA QA Agent" runAction={runJirita} />
 
       <AgentWorkspace
         testCases={testCases}
