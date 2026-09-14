@@ -2,11 +2,11 @@ import { notFound } from "next/navigation";
 import { getRun } from "@/lib/db/runs";
 import { RunDetailView } from "../../../_components/run-detail-view";
 
-const AGENT_ID = "marko";
+const AGENT_ID = "jirita";
 
-export default async function MarkoRunDetailPage({
+export default async function JiritaRunDetailPage({
   params,
-}: PageProps<"/agents/marko/runs/[runId]">) {
+}: PageProps<"/agents/jirita/runs/[runId]">) {
   const { runId } = await params;
   const run = getRun(runId);
 
@@ -14,5 +14,5 @@ export default async function MarkoRunDetailPage({
     notFound();
   }
 
-  return <RunDetailView agentName="MARKO QA Agent" run={run} />;
+  return <RunDetailView agentName="JIRITA QA Agent" run={run} />;
 }

@@ -1,5 +1,8 @@
 import { chromium, type Page } from "playwright";
-import type { RunResult, StepResult, TestCaseResult, TestCaseStatus } from "./types";
+import type { RunResult, StepResult, TestCaseResult, TestCaseStatus } from "@/lib/agents/types";
+import { safeErrorMessage } from "@/lib/agents/errors";
+import { captureFailureScreenshot } from "@/lib/agents/artifacts";
+import { captureLiveFrame, updateLiveRunState } from "@/lib/agents/live-state";
 
 const NAV_TIMEOUT_MS = 20_000;
 const ACTION_TIMEOUT_MS = 15_000;
@@ -171,16 +174,7 @@ const testCases: TestCaseDefinition[] = [
   },
 ];
 
-function safeErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    // Playwright errors put the useful summary on the first line and an
-    // optional verbose call log after it; keep only the summary.
-    return error.message.split("\n")[0].slice(0, 300);
-  }
-  return "Step failed with an unknown error.";
-}
-
-export async function runMarkoAgent(): Promise<RunResult> {
+export async function runMarkoAgent(runId: string): Promise<RunResult> {
   const baseUrl = process.env.MARKO_BASE_URL;
   const email = process.env.MARKO_QA_EMAIL;
   const password = process.env.MARKO_QA_PASSWORD;
@@ -201,12 +195,16 @@ export async function runMarkoAgent(): Promise<RunResult> {
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
 
+    let caseIndex = 0;
     for (const testCase of testCases) {
+      caseIndex += 1;
       const caseStartedAt = Date.now();
       const stepResults: StepResult[] = [];
       let caseHadRealFailure = false;
+      let stepIndexInCase = 0;
 
       for (const step of testCase.steps) {
+        stepIndexInCase += 1;
         stepCounter += 1;
         const stepStartedAt = Date.now();
 
@@ -221,6 +219,19 @@ export async function runMarkoAgent(): Promise<RunResult> {
           continue;
         }
 
+        await updateLiveRunState(runId, {
+          agentId: "marko",
+          currentCaseId: testCase.id,
+          currentCaseName: testCase.name,
+          currentStepId: stepCounter,
+          currentStepName: step.name,
+          currentCaseIndex: caseIndex,
+          totalCases: testCases.length,
+          currentStepIndex: stepIndexInCase,
+          totalStepsInCase: testCase.steps.length,
+        });
+        await captureLiveFrame(page, runId);
+
         try {
           await step.run(page, { baseUrl, email, password });
           stepResults.push({
@@ -230,12 +241,14 @@ export async function runMarkoAgent(): Promise<RunResult> {
             durationMs: Date.now() - stepStartedAt,
           });
         } catch (error) {
+          const artifactPath = await captureFailureScreenshot(page, runId, testCase.id, stepCounter);
           stepResults.push({
             id: stepCounter,
             name: step.name,
             status: "failed",
             durationMs: Date.now() - stepStartedAt,
             message: safeErrorMessage(error),
+            artifactPath,
           });
           blocked = true;
           caseHadRealFailure = true;

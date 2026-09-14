@@ -9,7 +9,7 @@ import type {
   StepStatus,
   TestCaseResult,
   TestCaseStatus,
-} from "@/lib/marko/types";
+} from "@/lib/agents/types";
 
 export type PersistedRun = RunResult & {
   id: string;
@@ -70,9 +70,18 @@ function getDb(): DatabaseSync {
       status TEXT NOT NULL,
       duration_ms INTEGER NOT NULL,
       message TEXT,
+      artifact_path TEXT,
       PRIMARY KEY (run_case_id, step_order)
     )
   `);
+
+  // Additive migration for databases created before artifact_path existed.
+  // Historical rows keep NULL; nothing is dropped or rewritten.
+  const stepColumns = instance.prepare("PRAGMA table_info(run_steps)").all();
+  const hasArtifactColumn = stepColumns.some((column) => String(column.name) === "artifact_path");
+  if (!hasArtifactColumn) {
+    instance.exec("ALTER TABLE run_steps ADD COLUMN artifact_path TEXT");
+  }
 
   db = instance;
   return instance;
@@ -85,6 +94,7 @@ function toStep(row: Record<string, SQLOutputValue>): StepResult {
     status: String(row.status) as StepStatus,
     durationMs: Number(row.duration_ms),
     message: row.message === null ? undefined : String(row.message),
+    artifactPath: row.artifact_path === null || row.artifact_path === undefined ? undefined : String(row.artifact_path),
   };
 }
 
@@ -123,10 +133,15 @@ function toRun(runRow: Record<string, SQLOutputValue>): PersistedRun {
   };
 }
 
-/** Persists a completed run with its test cases and steps atomically. Throws if persistence fails. */
-export function saveRun(agentId: string, result: RunResult): PersistedRun {
+/**
+ * Persists a completed run with its test cases and steps atomically. Throws
+ * if persistence fails. `runId` is generated once, before the run starts
+ * (see runAndPersist), so failure screenshots captured mid-run can already
+ * reference the same identity their step row ends up with here.
+ */
+export function saveRun(agentId: string, runId: string, result: RunResult): PersistedRun {
   const database = getDb();
-  const id = randomUUID();
+  const id = runId;
 
   database.exec("BEGIN");
   try {
@@ -142,8 +157,8 @@ export function saveRun(agentId: string, result: RunResult): PersistedRun {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     const insertStep = database.prepare(
-      `INSERT INTO run_steps (run_case_id, step_order, step_id, name, status, duration_ms, message)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO run_steps (run_case_id, step_order, step_id, name, status, duration_ms, message, artifact_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     result.testCases.forEach((testCase: TestCaseResult, caseIndex) => {
@@ -167,6 +182,7 @@ export function saveRun(agentId: string, result: RunResult): PersistedRun {
           step.status,
           step.durationMs,
           step.message ?? null,
+          step.artifactPath ?? null,
         );
       });
     });

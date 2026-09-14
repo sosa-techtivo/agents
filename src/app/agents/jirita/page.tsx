@@ -1,18 +1,103 @@
-const testPlan = [
-  "Open JIRITA login",
-  "Sign in with QA user",
-  "Validate Dashboard",
-  "Select All Projects",
-  "Open QA project",
-  "Create automated QA ticket",
-  "Verify ticket appears",
-  "Change ticket status",
-  "Register time",
-  "Validate My Work → Hours",
-  "Logout",
+import { runJirita } from "./actions";
+import { listRuns } from "@/lib/db/runs";
+import { RunAgentButton } from "../_components/run-agent-button";
+import { AgentWorkspace } from "../_components/agent-workspace";
+
+const AGENT_ID = "jirita";
+const RUNS_BASE_PATH = "/agents/jirita/runs";
+
+const testCases = [
+  {
+    id: "TC-01",
+    name: "Admin Authentication & Dashboard",
+    steps: [
+      "Open JIRITA",
+      "Sign in as Admin",
+      "Validate Dashboard",
+      "Validate main navigation",
+      "Validate Projects access",
+      "Sign out",
+    ],
+  },
+  {
+    id: "TC-02",
+    name: "Project Lead / Project Overview",
+    steps: [
+      "Sign in as Project Lead",
+      "Open JIRITA Live",
+      "Validate Project Overview",
+      "Validate project work sections",
+      "Validate project navigation",
+      "Sign out",
+    ],
+  },
+  {
+    id: "TC-03",
+    name: "Ticket Creation",
+    steps: [
+      "Sign in as Project Lead",
+      "Open JIRITA Live",
+      "Start new ticket",
+      "Create automated QA ticket",
+      "Verify ticket appears",
+      "Capture created ticket identity",
+    ],
+  },
+  {
+    id: "TC-04",
+    name: "Ticket Workflow",
+    steps: [
+      "Open created QA ticket",
+      "Capture current status and priority",
+      "Change ticket status",
+      "Change ticket priority",
+      "Reload or navigate away/back",
+      "Verify changes persisted",
+      "Sign out",
+    ],
+  },
+  {
+    id: "TC-05",
+    name: "Member Dashboard / All Projects",
+    steps: [
+      "Sign in as Member",
+      "Validate Member Dashboard",
+      "Validate All Projects selector",
+      "Validate All Projects default state",
+      "Validate dashboard content",
+      "Sign out",
+    ],
+  },
+  {
+    id: "TC-06",
+    name: "Member My Work & Hours",
+    steps: [
+      "Sign in as Member",
+      "Open JIRITA Live",
+      "Open created QA ticket",
+      "Register first small time entry",
+      "Register second small time entry",
+      "Open My Work",
+      "Open Hours",
+      "Verify accumulated time",
+      "Sign out",
+    ],
+  },
+  {
+    id: "TC-07",
+    name: "Reports",
+    steps: ["Sign in as Admin", "Open Reports", "Validate Reports loads", "Validate report content renders", "Sign out"],
+  },
+  {
+    id: "TC-08",
+    name: "Session Protection",
+    steps: ["Ensure signed out", "Open a protected JIRITA route", "Validate redirect to login"],
+  },
 ];
 
 export default function JiritaAgentPage() {
+  const runs = listRuns(AGENT_ID);
+
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -27,30 +112,14 @@ export default function JiritaAgentPage() {
         </p>
       </div>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-base font-medium text-zinc-900 dark:text-zinc-50">Test Plan</h2>
-        <ol className="mt-4 list-decimal space-y-1.5 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
-          {testPlan.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-      </section>
+      <RunAgentButton agentName="JIRITA QA Agent" runAction={runJirita} runsBasePath={RUNS_BASE_PATH} />
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-base font-medium text-zinc-900 dark:text-zinc-50">Last run</h2>
-        <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Never run</p>
-      </section>
-
-      <div>
-        <button
-          type="button"
-          disabled
-          className="inline-flex cursor-not-allowed items-center gap-2 rounded-md bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500"
-        >
-          Run Agent
-          <span className="text-xs font-normal">(Coming next)</span>
-        </button>
-      </div>
+      <AgentWorkspace
+        testCases={testCases}
+        runs={runs}
+        runsBasePath={RUNS_BASE_PATH}
+        agentName="JIRITA QA Agent"
+      />
     </div>
   );
 }

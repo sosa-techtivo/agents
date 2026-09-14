@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { runMarko } from "./actions";
-import type { RunResult, TestCaseResult } from "@/lib/marko/types";
-import { countPassedTestCases, countSteps } from "@/lib/marko/summary";
+import type { LiveRunState, RunOutcome, RunResult, TestCaseResult } from "@/lib/agents/types";
+import { countPassedTestCases, countSteps } from "@/lib/agents/summary";
 import { formatDuration } from "@/lib/format";
+import { LiveRunModal } from "./live-run-modal";
+
+const LIVE_POLL_INTERVAL_MS = 800;
 
 function caseBadgeClasses(status: TestCaseResult["status"]): string {
   if (status === "passed") {
@@ -60,7 +62,17 @@ function TestCaseBlock({ testCase }: { testCase: TestCaseResult }) {
   );
 }
 
-function RunSummary({ result, runId, persisted }: { result: RunResult; runId?: string; persisted: boolean }) {
+function RunSummary({
+  result,
+  runId,
+  persisted,
+  runsBasePath,
+}: {
+  result: RunResult;
+  runId?: string;
+  persisted: boolean;
+  runsBasePath: string;
+}) {
   const passedCases = countPassedTestCases(result);
   const steps = countSteps(result);
   const isPassed = result.status === "passed";
@@ -94,7 +106,7 @@ function RunSummary({ result, runId, persisted }: { result: RunResult; runId?: s
       </div>
       {persisted && runId ? (
         <Link
-          href={`/agents/marko/runs/${runId}`}
+          href={`${runsBasePath}/${runId}`}
           className="text-sm font-medium text-zinc-700 underline underline-offset-2 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
         >
           View run detail
@@ -114,20 +126,80 @@ type RunState = {
   persisted: boolean;
 };
 
-export function RunAgentButton() {
+export function RunAgentButton({
+  agentName,
+  runAction,
+  runsBasePath,
+}: {
+  agentName: string;
+  runAction: (runId: string) => Promise<RunOutcome>;
+  runsBasePath: string;
+}) {
   const [state, setState] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [liveState, setLiveState] = useState<LiveRunState | null>(null);
+  const [frameVersion, setFrameVersion] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
+  const activeRunId = useRef<string | null>(null);
+  const pollHandle = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopPolling() {
+    if (pollHandle.current !== null) {
+      clearInterval(pollHandle.current);
+      pollHandle.current = null;
+    }
+    activeRunId.current = null;
+    setLiveState(null);
+  }
+
+  function startPolling(runId: string) {
+    activeRunId.current = runId;
+    setLiveState(null);
+    setFrameVersion(0);
+
+    const poll = async () => {
+      if (activeRunId.current !== runId) return;
+      try {
+        const response = await fetch(`/agents/runs/${runId}/live`, { cache: "no-store" });
+        if (activeRunId.current !== runId) return;
+        if (response.ok) {
+          const data = (await response.json()) as LiveRunState;
+          setLiveState(data);
+          setFrameVersion((version) => version + 1);
+        }
+      } catch {
+        // Best-effort: a missed poll just tries again on the next tick.
+      }
+    };
+
+    poll();
+    pollHandle.current = setInterval(poll, LIVE_POLL_INTERVAL_MS);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (pollHandle.current !== null) clearInterval(pollHandle.current);
+    };
+  }, []);
 
   function handleRun() {
     setError(null);
+    setState(null);
+    setModalOpen(true);
+    const runId = crypto.randomUUID();
+    startPolling(runId);
+
     startTransition(async () => {
       try {
-        const outcome = await runMarko();
+        const outcome = await runAction(runId);
         setState(outcome);
       } catch {
         setState(null);
         setError("The agent run could not be started. Please try again.");
+        setModalOpen(false);
+      } finally {
+        stopPolling();
       }
     });
   }
@@ -145,8 +217,23 @@ export function RunAgentButton() {
         </button>
       </div>
       {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
-      {state ? (
-        <RunSummary result={state.result} runId={state.runId} persisted={state.persisted} />
+      {modalOpen ? (
+        <LiveRunModal
+          agentName={agentName}
+          phase={isPending ? "running" : "done"}
+          liveState={liveState}
+          frameSrc={liveState ? `/agents/runs/${liveState.runId}/live/frame?v=${frameVersion}` : null}
+          outcome={!isPending ? state : null}
+          onDone={() => setModalOpen(false)}
+        />
+      ) : null}
+      {!modalOpen && state ? (
+        <RunSummary
+          result={state.result}
+          runId={state.runId}
+          persisted={state.persisted}
+          runsBasePath={runsBasePath}
+        />
       ) : null}
     </div>
   );

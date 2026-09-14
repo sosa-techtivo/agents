@@ -1,15 +1,15 @@
 "use server";
 
 import { getSession } from "@/lib/auth";
-import { runMarkoAgent } from "@/lib/marko/runner";
+import { runJiritaAgent } from "@/lib/jirita/runner";
 import { runAndPersist } from "@/lib/agents/run-and-persist";
 import type { RunOutcome } from "@/lib/agents/types";
 
-export async function runMarko(runId: string): Promise<RunOutcome> {
+export async function runJirita(runId: string): Promise<RunOutcome> {
   const session = await getSession();
   if (!session) {
     throw new Error("Not authenticated.");
   }
 
-  return runAndPersist("marko", runId, runMarkoAgent);
+  return runAndPersist("jirita", runId, runJiritaAgent);
 }
