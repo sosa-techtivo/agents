@@ -8,6 +8,16 @@ export type StepResult = {
   message?: string;
 };
 
+export type TestCaseStatus = "passed" | "failed" | "skipped";
+
+export type TestCaseResult = {
+  id: string;
+  name: string;
+  status: TestCaseStatus;
+  durationMs: number;
+  steps: StepResult[];
+};
+
 export type RunStatus = "passed" | "failed";
 
 export type RunResult = {
@@ -15,5 +25,5 @@ export type RunResult = {
   startedAt: string;
   completedAt: string;
   durationMs: number;
-  steps: StepResult[];
+  testCases: TestCaseResult[];
 };

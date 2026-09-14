@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { getLastRun } from "@/lib/db/runs";
+import { countPassedTestCases } from "@/lib/marko/summary";
+import { formatDateTime } from "@/lib/format";
 
 const cardBase = "rounded-lg border p-6 flex flex-col gap-4";
 
@@ -18,6 +21,9 @@ function StatusBadge({ label, tone }: { label: string; tone: "ready" | "disabled
 }
 
 export default function AgentsPage() {
+  const lastMarkoRun = getLastRun("marko");
+  const markoPassedCases = lastMarkoRun ? countPassedTestCases(lastMarkoRun) : 0;
+
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -38,9 +44,15 @@ export default function AgentsPage() {
           </div>
           <dl className="grid grid-cols-2 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
             <dt>Last run</dt>
-            <dd className="text-right">Never</dd>
+            <dd className="text-right">
+              {lastMarkoRun ? formatDateTime(lastMarkoRun.startedAt) : "Never"}
+            </dd>
             <dt>Last result</dt>
-            <dd className="text-right">—</dd>
+            <dd className="text-right">
+              {lastMarkoRun
+                ? `${lastMarkoRun.status === "passed" ? "Passed" : "Failed"} · ${markoPassedCases}/${lastMarkoRun.testCases.length} test cases`
+                : "—"}
+            </dd>
           </dl>
           <Link
             href="/agents/marko"

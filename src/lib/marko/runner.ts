@@ -1,5 +1,5 @@
 import { chromium, type Page } from "playwright";
-import type { RunResult, StepResult } from "./types";
+import type { RunResult, StepResult, TestCaseResult, TestCaseStatus } from "./types";
 
 const NAV_TIMEOUT_MS = 20_000;
 const ACTION_TIMEOUT_MS = 15_000;
@@ -15,127 +15,159 @@ type StepDefinition = {
   run: (page: Page, ctx: StepContext) => Promise<void>;
 };
 
-// Each step drives MARKO through the real UI using semantic (role/label/text)
-// locators only, and validates real behavior rather than exact data values,
-// since page content (counts, dates, findings) legitimately changes over time.
-const steps: StepDefinition[] = [
+type TestCaseDefinition = {
+  id: string;
+  name: string;
+  steps: StepDefinition[];
+};
+
+// The 9 real steps, grouped into the 4 functional Test Cases MARKO is
+// organized around. Selectors and behavior are unchanged from the flat
+// list this replaces — only the grouping/return shape changed.
+const testCases: TestCaseDefinition[] = [
   {
-    name: "Open MARKO",
-    async run(page, { baseUrl }) {
-      await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-      await page
-        .getByRole("banner")
-        .getByRole("link", { name: "Sign in" })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-    },
+    id: "TC-01",
+    name: "Authentication",
+    steps: [
+      {
+        name: "Open MARKO",
+        async run(page, { baseUrl }) {
+          await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+          await page
+            .getByRole("banner")
+            .getByRole("link", { name: "Sign in" })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+        },
+      },
+      {
+        name: "Sign in",
+        async run(page, { email, password }) {
+          await page.getByRole("banner").getByRole("link", { name: "Sign in" }).click();
+          await page.waitForURL("**/login", { timeout: NAV_TIMEOUT_MS });
+          // The login form is client-rendered; filling before hydration completes
+          // can submit an empty value, so wait for the network to settle first.
+          await page.waitForLoadState("networkidle");
+
+          await page.getByRole("textbox", { name: "Email" }).fill(email);
+          await page.getByRole("textbox", { name: "Password" }).fill(password);
+          await page.getByRole("button", { name: "Sign in" }).click();
+          await page.waitForURL("**/dashboard", { timeout: NAV_TIMEOUT_MS });
+        },
+      },
+    ],
   },
   {
-    name: "Sign in",
-    async run(page, { email, password }) {
-      await page.getByRole("banner").getByRole("link", { name: "Sign in" }).click();
-      await page.waitForURL("**/login", { timeout: NAV_TIMEOUT_MS });
-      // The login form is client-rendered; filling before hydration completes
-      // can submit an empty value, so wait for the network to settle first.
-      await page.waitForLoadState("networkidle");
+    id: "TC-02",
+    name: "Sites Dashboard",
+    steps: [
+      {
+        name: "Validate Sites dashboard",
+        async run(page) {
+          await page
+            .getByRole("heading", { name: "Sites", level: 1 })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
 
-      await page.getByRole("textbox", { name: "Email" }).fill(email);
-      await page.getByRole("textbox", { name: "Password" }).fill(password);
-      await page.getByRole("button", { name: "Sign in" }).click();
-      await page.waitForURL("**/dashboard", { timeout: NAV_TIMEOUT_MS });
-    },
+          const anySite = page
+            .getByRole("link")
+            .filter({ has: page.getByRole("button", { name: "Site actions" }) });
+          if ((await anySite.count()) < 1) {
+            throw new Error("No sites are listed on the dashboard.");
+          }
+
+          await page
+            .getByText("Techtivo.com", { exact: true })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+        },
+      },
+      {
+        name: "Open Techtivo.com report",
+        async run(page) {
+          const siteCard = page
+            .getByText("Techtivo.com", { exact: true })
+            .locator("xpath=ancestor::a[1]");
+          await siteCard.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+
+          await Promise.all([
+            page.waitForURL("**/dashboard/sites/**", { timeout: NAV_TIMEOUT_MS }),
+            siteCard.click(),
+          ]);
+
+          await page
+            .getByText("Loading site")
+            .waitFor({ state: "detached", timeout: NAV_TIMEOUT_MS })
+            .catch(() => {});
+        },
+      },
+    ],
   },
   {
-    name: "Validate Sites dashboard",
-    async run(page) {
-      await page
-        .getByRole("heading", { name: "Sites", level: 1 })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+    id: "TC-03",
+    name: "SEO Report",
+    steps: [
+      {
+        name: "Validate SEO health",
+        async run(page) {
+          await page
+            .getByRole("heading", { name: "Current SEO health", level: 2 })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+          await page
+            .getByText("Pages analyzed", { exact: true })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+        },
+      },
+      {
+        name: "Validate MARKO Insights",
+        async run(page) {
+          const heading = page.getByRole("heading", { name: "MARKO Insights", level: 2 });
+          await heading.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
 
-      const anySite = page
-        .getByRole("link")
-        .filter({ has: page.getByRole("button", { name: "Site actions" }) });
-      if ((await anySite.count()) < 1) {
-        throw new Error("No sites are listed on the dashboard.");
-      }
+          const card = heading.locator("xpath=..");
+          if ((await card.getByRole("listitem").count()) < 1) {
+            throw new Error("MARKO Insights did not render any findings.");
+          }
+        },
+      },
+      {
+        name: "Validate Analysis history",
+        async run(page) {
+          const heading = page.getByRole("heading", { name: "Analysis history", level: 2 });
+          await heading.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
 
-      await page
-        .getByText("Techtivo.com", { exact: true })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-    },
+          const card = heading.locator("xpath=..");
+          if ((await card.getByRole("listitem").count()) < 1) {
+            throw new Error("Analysis history did not render any entries.");
+          }
+        },
+      },
+      {
+        name: "Validate Search Console",
+        async run(page) {
+          const heading = page.getByRole("heading", { name: "Search Console", level: 2 });
+          await heading.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+
+          const card = heading.locator("xpath=..");
+          await card
+            .getByText("Connected", { exact: true })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+        },
+      },
+    ],
   },
   {
-    name: "Open Techtivo.com report",
-    async run(page) {
-      const siteCard = page.getByText("Techtivo.com", { exact: true }).locator("xpath=ancestor::a[1]");
-      await siteCard.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-
-      await Promise.all([
-        page.waitForURL("**/dashboard/sites/**", { timeout: NAV_TIMEOUT_MS }),
-        siteCard.click(),
-      ]);
-
-      await page
-        .getByText("Loading site")
-        .waitFor({ state: "detached", timeout: NAV_TIMEOUT_MS })
-        .catch(() => {});
-    },
-  },
-  {
-    name: "Validate SEO health",
-    async run(page) {
-      await page
-        .getByRole("heading", { name: "Current SEO health", level: 2 })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-      await page
-        .getByText("Pages analyzed", { exact: true })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-    },
-  },
-  {
-    name: "Validate MARKO Insights",
-    async run(page) {
-      const heading = page.getByRole("heading", { name: "MARKO Insights", level: 2 });
-      await heading.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-
-      const card = heading.locator("xpath=..");
-      if ((await card.getByRole("listitem").count()) < 1) {
-        throw new Error("MARKO Insights did not render any findings.");
-      }
-    },
-  },
-  {
-    name: "Validate Analysis history",
-    async run(page) {
-      const heading = page.getByRole("heading", { name: "Analysis history", level: 2 });
-      await heading.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-
-      const card = heading.locator("xpath=..");
-      if ((await card.getByRole("listitem").count()) < 1) {
-        throw new Error("Analysis history did not render any entries.");
-      }
-    },
-  },
-  {
-    name: "Validate Search Console",
-    async run(page) {
-      const heading = page.getByRole("heading", { name: "Search Console", level: 2 });
-      await heading.waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-
-      const card = heading.locator("xpath=..");
-      await card
-        .getByText("Connected", { exact: true })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-    },
-  },
-  {
-    name: "Sign out",
-    async run(page) {
-      await page.getByRole("button", { name: "Sign out" }).click();
-      await page.waitForURL("**/login", { timeout: NAV_TIMEOUT_MS });
-      await page
-        .getByRole("button", { name: "Sign in" })
-        .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
-    },
+    id: "TC-04",
+    name: "Sign Out",
+    steps: [
+      {
+        name: "Sign out",
+        async run(page) {
+          await page.getByRole("button", { name: "Sign out" }).click();
+          await page.waitForURL("**/login", { timeout: NAV_TIMEOUT_MS });
+          await page
+            .getByRole("button", { name: "Sign in" })
+            .waitFor({ state: "visible", timeout: ACTION_TIMEOUT_MS });
+        },
+      },
+    ],
   },
 ];
 
@@ -158,8 +190,9 @@ export async function runMarkoAgent(): Promise<RunResult> {
   }
 
   const startedAt = new Date();
-  const results: StepResult[] = [];
+  const caseResults: TestCaseResult[] = [];
   let blocked = false;
+  let stepCounter = 0;
 
   const browser = await chromium.launch({ headless: true, timeout: NAV_TIMEOUT_MS });
   try {
@@ -168,39 +201,63 @@ export async function runMarkoAgent(): Promise<RunResult> {
     page.setDefaultTimeout(ACTION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
 
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      const stepStartedAt = Date.now();
+    for (const testCase of testCases) {
+      const caseStartedAt = Date.now();
+      const stepResults: StepResult[] = [];
+      let caseHadRealFailure = false;
 
-      if (blocked) {
-        results.push({
-          id: i + 1,
-          name: step.name,
-          status: "failed",
-          durationMs: 0,
-          message: "Skipped after an earlier step failed.",
-        });
-        continue;
+      for (const step of testCase.steps) {
+        stepCounter += 1;
+        const stepStartedAt = Date.now();
+
+        if (blocked) {
+          stepResults.push({
+            id: stepCounter,
+            name: step.name,
+            status: "failed",
+            durationMs: 0,
+            message: "Skipped after an earlier step failed.",
+          });
+          continue;
+        }
+
+        try {
+          await step.run(page, { baseUrl, email, password });
+          stepResults.push({
+            id: stepCounter,
+            name: step.name,
+            status: "passed",
+            durationMs: Date.now() - stepStartedAt,
+          });
+        } catch (error) {
+          stepResults.push({
+            id: stepCounter,
+            name: step.name,
+            status: "failed",
+            durationMs: Date.now() - stepStartedAt,
+            message: safeErrorMessage(error),
+          });
+          blocked = true;
+          caseHadRealFailure = true;
+        }
       }
 
-      try {
-        await step.run(page, { baseUrl, email, password });
-        results.push({
-          id: i + 1,
-          name: step.name,
-          status: "passed",
-          durationMs: Date.now() - stepStartedAt,
-        });
-      } catch (error) {
-        results.push({
-          id: i + 1,
-          name: step.name,
-          status: "failed",
-          durationMs: Date.now() - stepStartedAt,
-          message: safeErrorMessage(error),
-        });
-        blocked = true;
-      }
+      // A case is "skipped" only when none of its steps actually ran (the
+      // run was already blocked before this case started). A case that
+      // itself produced the failure is "failed", not "skipped".
+      const status: TestCaseStatus = caseHadRealFailure
+        ? "failed"
+        : stepResults.every((step) => step.status === "passed")
+          ? "passed"
+          : "skipped";
+
+      caseResults.push({
+        id: testCase.id,
+        name: testCase.name,
+        status,
+        durationMs: Date.now() - caseStartedAt,
+        steps: stepResults,
+      });
     }
   } finally {
     await browser.close();
@@ -209,10 +266,10 @@ export async function runMarkoAgent(): Promise<RunResult> {
   const completedAt = new Date();
 
   return {
-    status: results.every((step) => step.status === "passed") ? "passed" : "failed",
+    status: caseResults.every((testCase) => testCase.status === "passed") ? "passed" : "failed",
     startedAt: startedAt.toISOString(),
     completedAt: completedAt.toISOString(),
     durationMs: completedAt.getTime() - startedAt.getTime(),
-    steps: results,
+    testCases: caseResults,
   };
 }

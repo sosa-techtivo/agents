@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# local SQLite persistence (Techtivo AGENTS run history)
+/.data/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
